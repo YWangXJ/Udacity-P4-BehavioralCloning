@@ -3,14 +3,15 @@ import os
 import csv
 import math 
 
-
+###read driving img paths and mearsurements
 samples = []
 with open('../data/driving_log.csv') as csvfile:
     reader = csv.reader(csvfile)
     next(reader)
     for line in reader:
         samples.append(line)
-
+print('total number of samples',len(samples))
+### split the samples
 from sklearn.model_selection import train_test_split
 train_samples, validation_samples = train_test_split(samples, test_size=0.2)
 
@@ -19,7 +20,8 @@ import numpy as np
 import sklearn
 from sklearn.utils import shuffle
 import random
-# Generate random brightness function, produce darker transformation 
+
+### Generate random brightness function, produce darker transformation 
 def random_brightness(image):
     #Convert 2 HSV colorspace from RGB colorspace
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
@@ -29,11 +31,14 @@ def random_brightness(image):
     #Convert back to RGB colorspace
     new_img = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
     return new_img 
-# Crop image to remove the sky and driving deck, resize to 64x64 dimension 
+
+### Crop image to remove the sky and driving deck, resize to 64x64 dimension (tried a version without resizing but not good. not sure what's the reason)
 def crop_resize(image):
   cropped = cv2.resize(image[60:140,:], (64,64))
   return cropped
-def generator(samples, batch_size=32,correction=0.2):
+
+### use generator to save memory and create trainng and validation data
+def generator(samples, batch_size=32,correction=0.3):
     num_samples = len(samples)
     while 1: # Loop forever so the generator never terminates
         shuffle(samples)
@@ -48,6 +53,7 @@ def generator(samples, batch_size=32,correction=0.2):
                 left_name = '../data/IMG/'+batch_sample[1].split('/')[-1]
                 right_name = '../data/IMG/'+batch_sample[2].split('/')[-1]
 #                 print('center_name',center_name)
+                ### augment, crop and resize the image inputs
                 center_image = crop_resize(random_brightness(cv2.imread(center_name)))
                 left_image = crop_resize(random_brightness(cv2.imread(left_name)))
                 right_image = crop_resize(random_brightness(cv2.imread(right_name)))
@@ -65,23 +71,17 @@ def generator(samples, batch_size=32,correction=0.2):
                 angles.append(center_angle)
                 angles.append(left_angle)
                 angles.append(right_angle)
-#             print('ori:',len(angles))
-            #data augmentation
-           
+
+            ### flip the img on vertical axis          
             for image,angle in zip(images,angles):
                 augmented_images.append(image)
                 augmented_angles.append(angle)
                 augmented_images.append(cv2.flip(image,1))
                 augmented_angles.append(angle*-1.0)
-#             print('aug:',len(augmented_angles))
-            # trim image to only see section with road
+
             X_train = np.array(augmented_images)
             y_train = np.array(augmented_angles)
-#             print('X_train', X_train)
-#             print('y_train', y_train)
             yield sklearn.utils.shuffle(X_train, y_train)
-            
-  
 
 
 # Set our batch size
@@ -99,12 +99,9 @@ from keras.regularizers import l2
 
 #NVIDIA architecture
 input_shape = (64,64,3)
-# input_shape = (160,320,3)
-# ch, row, col = 3, 90, 320  # Trimmed image format
-model = Sequential()
-# model.add(Cropping2D(cropping=((50,20),(0,0)),input_shape = input_shape))
-model.add(Lambda(lambda x: x/172.5- 1, input_shape=input_shape))
 
+model = Sequential()
+model.add(Lambda(lambda x: x/172.5- 1, input_shape=input_shape)) #nomalize the data
 model.add(Convolution2D(24, 5, 5, border_mode='valid', subsample =(2,2), W_regularizer = l2(0.001)))
 model.add(Activation('relu'))
 model.add(Convolution2D(36, 5, 5, border_mode='valid', subsample =(2,2), W_regularizer = l2(0.001)))
@@ -124,7 +121,7 @@ model.add(Dense(16, W_regularizer = l2(0.001)))
 model.add(Dropout(0.5))
 model.add(Dense(10, W_regularizer = l2(0.001)))
 model.add(Dense(1, W_regularizer = l2(0.001)))
-
+model.summary()
 
 
 model.compile(loss='mse',optimizer='adam')
@@ -133,10 +130,11 @@ history_object = model.fit_generator(train_generator,
             steps_per_epoch=math.ceil(len(train_samples)/batch_size), 
             validation_data=validation_generator, 
             validation_steps=math.ceil(len(validation_samples)/batch_size), 
-            epochs=5, verbose=1)
+            epochs=3, verbose=1)
 
 model.save('model.h5')
 print('Congrats! Model saved')
+
 ### print the keys contained in the history object
 print(history_object.history.keys())
 import matplotlib.pyplot as plt
